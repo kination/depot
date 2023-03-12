@@ -1,6 +1,9 @@
-use tokio::io::AsyncWriteExt;
-use tokio::net::TcpStream;
-use tokio::fs::File;
+use std::sync::Arc;
+use std::fs::File;
+use parquet::file::properties::WriterProperties;
+use arrow_array::{Int32Array, ArrayRef,RecordBatch};
+use parquet::arrow::arrow_writer::ArrowWriter;
+// use tokio::fs::File;
 
 use rdkafka::client::ClientContext;
 use rdkafka::consumer::{CommitMode, Consumer, ConsumerContext, Rebalance};
@@ -11,8 +14,6 @@ use rdkafka::message::{Headers, Message};
 use rdkafka::topic_partition_list::TopicPartitionList;
 
 use serde_json::{Result, Value};
-use std::sync::Arc;
-use parquet::file::writer::SerializedFileWriter;
 
 
 /// struct which holds value as json object
@@ -37,6 +38,7 @@ impl ConsumerContext for CustomContext {
         println!("Committing offsets: {:?}", result);
     }
 }
+
 type LoggingConsumer = StreamConsumer<CustomContext>;
 
 #[tokio::main]
@@ -44,9 +46,11 @@ pub async fn main() {
     
     let bootstrap_servers = "localhost:9092";
     let group_id = "group-id";
-    let topics = vec!["dummy-topic"];
+    let topics = vec!["quickstart"];
 
-    consume_kafka(bootstrap_servers, group_id, &topics);
+    println!("Running kafka consumer...");
+
+    consume_kafka(bootstrap_servers, group_id, &topics).await;
 }
 
 // consume kafka message
@@ -57,15 +61,16 @@ async fn consume_kafka(bootstrap_servers: &str, group_id: &str, topics: &[&str])
         .set("group.id", group_id)
         .set("bootstrap.servers", bootstrap_servers)
         .set_log_level(RDKafkaLogLevel::Debug)
-        .create_with_context(CustomContext)
-        .expect("");
+        .create_with_context(context)
+        .expect("Failed getting consumer");
 
-    consumer.subscribe(topics).expect("");
+    consumer.subscribe(topics).expect("No subscriptions");
 
     loop {
         match consumer.recv().await {
-            Err(err) => eprint!("{:?}", err),
+            Err(err) => println!("{:?}", err),
             Ok(m) => {
+                println!("Received borrowed message");
                 let payload = match m.payload_view::<str>() {
                     None => "",
                     Some(Ok(s)) => s,
@@ -77,12 +82,21 @@ async fn consume_kafka(bootstrap_servers: &str, group_id: &str, topics: &[&str])
 
                 println!("key: {:?}, payload: {:?}, topic: {:?}, partition: {:?}, offset: {:?}", m.key(), payload, m.topic(), m.partition(), m.offset());
 
-                // if let Some(headers) = m.headers() {
-                //     for header in headers.iter() {
-                //         info!("  Header {:#?}: {:?}", header.key, header.value);
-                //     }
-                // }
                 consumer.commit_message(&m, CommitMode::Async).unwrap();
+
+                let ids = Int32Array::from(vec![1, 2, 3, 4]);
+                let vals = Int32Array::from(vec![5, 6, 7, 8]);
+                let batch = RecordBatch::try_from_iter(vec![
+                  ("id", Arc::new(ids) as ArrayRef),
+                  ("val", Arc::new(vals) as ArrayRef),
+                ]).unwrap();
+
+                let file = File::create("data.parquet").unwrap();
+                let props = WriterProperties::builder().build();
+
+                let mut writer = ArrowWriter::try_new(file, batch.schema(), Some(props)).unwrap();
+                writer.write(&batch).expect("Writing batch");
+                writer.close().unwrap();
             }
         }
     }
