@@ -1294,8 +1294,10 @@ version = "0.0.1"
 dependencies = [
  "arrow",
  "arrow-array",
+ "arrow-csv",
  "parquet",
  "rdkafka",
+ "serde",
  "serde_json",
  "tokio",
 ]
