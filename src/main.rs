@@ -1,6 +1,10 @@
-use tokio::io::AsyncWriteExt;
-use tokio::net::TcpStream;
-use tokio::fs::File;
+pub mod sink;
+pub mod schema;
+
+use crate::schema::{KafkaConsumerMessage, get_record_batch};
+use crate::sink::{write_as_csv, write_as_parquet};
+
+use arrow_array::{RecordBatch};
 
 use rdkafka::client::ClientContext;
 use rdkafka::consumer::{CommitMode, Consumer, ConsumerContext, Rebalance};
@@ -9,10 +13,6 @@ use rdkafka::consumer::stream_consumer::StreamConsumer;
 use rdkafka::error::KafkaResult;
 use rdkafka::message::{Headers, Message};
 use rdkafka::topic_partition_list::TopicPartitionList;
-
-use serde_json::{Result, Value};
-use std::sync::Arc;
-use parquet::file::writer::SerializedFileWriter;
 
 
 /// struct which holds value as json object
@@ -37,16 +37,21 @@ impl ConsumerContext for CustomContext {
         println!("Committing offsets: {:?}", result);
     }
 }
+
 type LoggingConsumer = StreamConsumer<CustomContext>;
+
+
 
 #[tokio::main]
 pub async fn main() {
     
     let bootstrap_servers = "localhost:9092";
     let group_id = "group-id";
-    let topics = vec!["dummy-topic"];
+    let topics = vec!["quickstart"];
 
-    consume_kafka(bootstrap_servers, group_id, &topics);
+    println!("Running kafka consumer...");
+
+    consume_kafka(bootstrap_servers, group_id, &topics).await;
 }
 
 // consume kafka message
@@ -57,15 +62,16 @@ async fn consume_kafka(bootstrap_servers: &str, group_id: &str, topics: &[&str])
         .set("group.id", group_id)
         .set("bootstrap.servers", bootstrap_servers)
         .set_log_level(RDKafkaLogLevel::Debug)
-        .create_with_context(CustomContext)
-        .expect("");
+        .create_with_context(context)
+        .expect("Failed getting consumer");
 
-    consumer.subscribe(topics).expect("");
+    consumer.subscribe(topics).expect("No subscriptions");
 
     loop {
         match consumer.recv().await {
-            Err(err) => eprint!("{:?}", err),
+            Err(err) => println!("{:?}", err),
             Ok(m) => {
+                println!("Received borrowed message");
                 let payload = match m.payload_view::<str>() {
                     None => "",
                     Some(Ok(s)) => s,
@@ -77,30 +83,14 @@ async fn consume_kafka(bootstrap_servers: &str, group_id: &str, topics: &[&str])
 
                 println!("key: {:?}, payload: {:?}, topic: {:?}, partition: {:?}, offset: {:?}", m.key(), payload, m.topic(), m.partition(), m.offset());
 
-                // if let Some(headers) = m.headers() {
-                //     for header in headers.iter() {
-                //         info!("  Header {:#?}: {:?}", header.key, header.value);
-                //     }
-                // }
                 consumer.commit_message(&m, CommitMode::Async).unwrap();
+                let cm: KafkaConsumerMessage = serde_json::from_str(payload).unwrap();
+                let rb: RecordBatch = get_record_batch(cm);
+
+                // TODO: using 'clone' here is not ideal
+                write_as_parquet(rb.clone(), "test.parquet");
+                write_as_csv(rb.clone(), "test.csv");
             }
         }
     }
 }
-
-// how can I read schema from kafka message?
-async fn schema_from_kafka_msg(msg: &str) {
-    let schema = "";
-
-
-}
-
-/*
-write a function which receives kafka messages as string
-, and deserialize it to json object
-*/
-async fn deserialize_kafka_msg(msg: &str) {
-    let jsoned: Value = serde_json::from_str(msg).expect("failed to deserialize");
-
-}
-
