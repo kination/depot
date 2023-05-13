@@ -1,10 +1,5 @@
 use std::sync::Arc;
-
-use std::fs::File;
-use parquet::file::properties::WriterProperties;
-use parquet::arrow::arrow_writer::ArrowWriter;
-use arrow_csv::writer::Writer;
-
+use std::collections::LinkedList;
 use arrow_array::{Int64Array, StringArray, ArrayRef,RecordBatch};
 use arrow::datatypes::{Field,Schema,DataType};
 
@@ -17,10 +12,19 @@ pub struct KafkaConsumerMessage {
     val: String
 }
 
-pub fn get_record_batch(msg: KafkaConsumerMessage) -> RecordBatch {
-    let ids = Int64Array::from(vec![msg.id]);
-    let vals = StringArray::from(vec![msg.val]);
+pub fn get_record_batch(list: Vec<KafkaConsumerMessage>) -> RecordBatch {
 
+    let mut id_vec: Vec<i64> = Vec::new();
+    let mut vals_vec: Vec<String> = Vec::new();
+
+    for v in list {
+        id_vec.push(v.id);
+        vals_vec.push(v.val);
+    }
+    
+    let ids = Int64Array::from(id_vec);
+    let vals = StringArray::from(vals_vec);
+    
     let schema = Schema::new(vec![
         Field::new("id", DataType::Int64, false),
         Field::new("val", DataType::Utf8, false)
