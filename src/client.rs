@@ -17,6 +17,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     connection.keep_alive(true)?;
 
     // open a new stream and split the receiving and sending sides
+    println!("--- Client started. Write down message and press enter ---");
     let stream = connection.open_bidirectional_stream().await?;
     let (mut receive_stream, mut send_stream) = stream.split();
 
