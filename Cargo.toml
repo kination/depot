@@ -1,6 +1,20 @@
 [package]
-name = "toqueue"
+name = "depot"
 version = "0.0.1"
 edition = "2021"
 
 [dependencies]
+tokio = { version = "1.28", features = ["full"] }
+rustls = "0.23.13"
+quinn = "0.11"
+quinn-proto = "0.11"
+rcgen = "0.13.1"
+s2n-quic = "1"
+
+[[bin]]
+name = "server"
+path = "src/server.rs"
+
+[[bin]]
+name = "client"
+path = "src/client.rs"
