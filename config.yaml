@@ -2,5 +2,5 @@ server:
   host: "127.0.0.1"
   port: 4433
   tls:
-    cert_file_path: "path/to/cert.pem"
-    key_file_path: "path/to/key.pem"
+    cert_file_path: "cert/cert.pem"
+    key_file_path: "cert/key.pem"

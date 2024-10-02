@@ -210,10 +210,33 @@ dependencies = [
 ]
 
 [[package]]
-name = "depot"
+name = "depot-client"
 version = "0.0.1"
 dependencies = [
  "bytes",
+ "depot-common",
+ "rcgen",
+ "rustls",
+ "s2n-quic",
+ "serde",
+ "serde_yaml",
+ "tokio",
+]
+
+[[package]]
+name = "depot-common"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_yaml",
+]
+
+[[package]]
+name = "depot-server"
+version = "0.0.1"
+dependencies = [
+ "bytes",
+ "depot-common",
  "rcgen",
  "rustls",
  "s2n-quic",
