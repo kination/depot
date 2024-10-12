@@ -1,9 +1,14 @@
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use clap::{Parser, Subcommand};
 use s2n_quic::{client::Connect, Client};
 use std::{error::Error, path::Path};
 use std::net::{SocketAddr, ToSocketAddrs};
+use bytes::Bytes;
 
 use depot_common::Config;
+use depot_common::MessageQueue;
+
 
 #[derive(Parser)]
 struct Cli {
@@ -43,8 +48,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     match cli.command {
         Commands::Read { host, port, tls_cert_file_path } => {
+            let config = Config::new();
+            let server_addr = format!("{}:{}", &config.server.host, &config.server.port).to_socket_addrs()?.next().unwrap();
+            let client = Client::builder()
+                .with_tls(Path::new(&config.server.tls.cert_file_path))?
+                .with_io("0.0.0.0:0")?
+                .start()?;
 
-        }
+            let addr: SocketAddr = server_addr;
+            let connect = Connect::new(addr).with_server_name("localhost");
+            let mut connection = client.connect(connect).await?;
+
+            // Open a new bidirectional stream
+            let stream = connection.open_bidirectional_stream().await?;
+            let (mut receive_stream, mut send_stream) = stream.split(); // Split the stream here
+
+            println!("--- Read client started. ---");
+            // Send the read command
+            send_stream.send(Bytes::from("read")).await?;
+
+            // Receive the response from the server
+            while let Ok(Some(data)) = receive_stream.receive().await {
+                println!("Received data: {:?}", data);
+            }
+        },
         Commands::Write { host, port, tls_cert_file_path } => {
             let config = Config::new();
             let server_addr = format!("{}:{}", &config.server.host, &config.server.port).to_socket_addrs()?.next().unwrap();
@@ -61,7 +88,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             connection.keep_alive(true)?;
 
             // open a new bidirection stream
-            println!("--- Client started. Write down message and press enter ---");
+            println!("--- Write client started. Write down message and press enter ---");
             let stream = connection.open_bidirectional_stream().await?;
             let (mut receive_stream, mut send_stream) = stream.split();
 
@@ -79,3 +106,4 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
+
