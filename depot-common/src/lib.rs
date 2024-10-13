@@ -1,22 +1,22 @@
-use std::collections::VecDeque;
 use bytes::Bytes;
+use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use std::fs;
+use std::path::PathBuf;
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
-    pub server: ServerConfig
+    pub server: ServerConfig,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
-    pub tls: TlsConfig
+    pub tls: TlsConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -29,12 +29,13 @@ impl Config {
     pub fn new() -> Self {
         let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let config_file_path = project_root.parent().unwrap().join("config.yaml");
-        let config_file_content = fs::File::open(config_file_path).expect("Failed to read config file");
-        let config: Config = serde_yaml::from_reader(config_file_content).expect("Failed to parse yaml config file");
+        let config_file_content =
+            fs::File::open(config_file_path).expect("Failed to read config file");
+        let config: Config =
+            serde_yaml::from_reader(config_file_content).expect("Failed to parse yaml config file");
         config
     }
 }
-
 
 #[derive(Debug)]
 pub struct MessageQueue {
@@ -57,5 +58,10 @@ impl MessageQueue {
         let mut queue = self.messages.lock().await;
         queue.pop_front()
     }
-}
 
+    pub async fn is_empty(&self) -> bool {
+        // Added is_empty function
+        let queue = self.messages.lock().await;
+        queue.is_empty() // Check if the underlying VecDeque is empty
+    }
+}

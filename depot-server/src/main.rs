@@ -1,23 +1,24 @@
-
-use std::sync::Arc;
-use s2n_quic::Server;
 use s2n_quic::stream::BidirectionalStream;
-use std::{error::Error, path::Path};
+use s2n_quic::Server;
 use std::net::ToSocketAddrs;
+use std::sync::Arc;
+use std::{error::Error, path::Path};
 
-use tokio::sync::Mutex;
 use depot_common::Config;
 use depot_common::MessageQueue;
-
+use tokio::sync::{Mutex, Notify};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let config = Config::new();
-    let server_addr = format!("{}:{}", &config.server.host, &config.server.port).to_socket_addrs()?.next().unwrap();
+    let server_addr = format!("{}:{}", &config.server.host, &config.server.port)
+        .to_socket_addrs()?
+        .next()
+        .unwrap();
     let mut server = Server::builder()
         .with_tls((
             Path::new(&config.server.tls.cert_file_path),
-            Path::new(&config.server.tls.key_file_path)
+            Path::new(&config.server.tls.key_file_path),
         ))?
         .with_io(server_addr)?
         .start()?;
@@ -33,20 +34,35 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let queue = Arc::clone(&queue);
 
                 tokio::spawn(async move {
-                    while let Ok(Some(data)) = stream.receive().await {
-                        if data == "read" {
-                            println!("Read from queue");
-                            handle_read_request(queue.clone(), &mut stream).await;
-                        } else {
-                            println!("Received data: {:?}", data);
-                            let queue_guard = queue.lock().await;
-                            queue_guard.push(data.clone()).await;
-                            println!("Queue contents: {:?}", *queue_guard);
-                            drop(queue_guard);
+                    // First, read the type of connection (writer or reader)
+                    if let Ok(Some(connection_type)) = stream.receive().await {
+                        match String::from_utf8_lossy(&connection_type.to_vec()).as_ref() {
+                            "writer" => {
+                                println!("Start writer");
+                                // Handle writer connection
+                                while let Ok(Some(data)) = stream.receive().await {
+                                    println!("Received data from writer: {:?}", data);
+                                    let queue_guard = queue.lock().await;
+                                    queue_guard.push(data.clone()).await;
+                                    println!("Queue contents: {:?}", *queue_guard);
+                                }
+                            }
+                            "reader" => {
+                                println!("Start reader");
+                                loop {
+                                    let queue_guard = queue.lock().await;
+                                    if let Some(data) = queue_guard.pop().await {
+                                        println!("Sending data to reader: {:?}", data);
+                                        if let Err(e) = stream.send(data).await {
+                                            eprintln!("Failed to send data to reader: {:?}", e);
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {
+                                eprintln!("Unknown connection type: {:?}", connection_type);
+                            }
                         }
-                        // if let Err(e) = save_queue_to_file(&*queue_guard).await {
-                        //     eprintln!("Failed to save queue: {:?}", e);
-                        // }
                     }
                 });
             }
@@ -68,15 +84,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
 // }
 
 async fn handle_read_request(queue: Arc<Mutex<MessageQueue>>, stream: &mut BidirectionalStream) {
+    let notify = Arc::new(Notify::new());
     let queue_guard = queue.lock().await;
-    if let Some(data) = queue_guard.pop().await { // Assuming pop() returns Option<DataType>
+    while let Some(data) = queue_guard.pop().await {
+        // Assuming pop() returns Option<DataType>
         // Send the data back to the client
         if let Err(e) = stream.send(data).await {
-            eprintln!("Failed to send data: {:?}", e);
+            eprintln!("Failed to send data to reader: {:?}", e);
         }
-    } else {
-        // Optionally send a message indicating the queue is empty
-        let empty_message = "Queue is empty".to_string();
-        let _ = stream.send(empty_message.into()).await;
     }
+
+    notify.notify_one();
+    // } else {
+    //     // Optionally send a message indicating the queue is empty
+    //     let empty_message = "Queue is empty".to_string();
+    //     let _ = stream.send(empty_message.into()).await;
+    // }
 }
