@@ -4,7 +4,9 @@
 Cloud-native log collector
 
 ## Description
-Collecting log from various source (system log, server log, common http message..)
+Goal: Collecting log from various source (system log, server log, common http message..)
+
+![depot-diagram drawio](https://github.com/user-attachments/assets/9886f26d-b959-495a-a20d-d8502ddedf75)
 
 ## Getting Started
 
