@@ -1,12 +1,10 @@
 **Project for academic purpose**
 
 ## depot
-Goal: depot is cloud-native message queue system
+Cloud-native log collector
 
 ## Description
-This is based on 2 main components
-- depot-server: server application which receive/send message from/to client
-- depot-server: client application to read/write data
+Collecting log from various source (system log, server log, common http message..)
 
 ## Getting Started
 
@@ -26,20 +24,8 @@ $ cargo run --bin depot-server
 ```
 
 2. Open a new terminal window and run writer client to send a message:
-```
-$ cd path/to/project/root
-$ cargo run --bin depot-client -- write
-...
---- Write client started... ---
-```
+// ...TODO
 
-3. Open a new terminal window and run reader client to read  message from server queue:
-```
-$ cd path/to/project/root
-$ cargo run --bin depot-client -- read
-...
---- Write client started... ---
-```
 
 ## Project Structure
 
