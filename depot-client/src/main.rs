@@ -4,7 +4,7 @@ use s2n_quic::{client::Connect, Client};
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 use std::{error::Error, path::Path};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{self, AsyncBufReadExt};
 use tokio::sync::Mutex;
 use tokio::time::{self, Duration};
 
@@ -19,6 +19,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    File {
+        #[clap(long)]
+        log_file_path: String,
+    },
     Write {
         #[clap(long)]
         host: Option<String>,
@@ -46,6 +50,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::File { log_file_path } => {
+            println!("--- Read new lines of log file: {} ---", log_file_path);
+            let file = tokio::fs::File::open(log_file_path).await?;
+            let mut reader = tokio::io::BufReader::new(file);
+            let mut buffer = String::new();
+    
+            loop {
+                // Read new lines from the log file
+                let bytes_read = reader.read_line(&mut buffer).await?;
+                if bytes_read == 0 {
+                    // If no bytes were read, wait for a while before trying again
+                    println!("No new line, wait for 10 second");
+                    time::sleep(Duration::from_secs(10)).await;
+                } else {
+                    // Print the new line read from the log file
+                    println!("Read line -> {}", buffer);
+                    buffer.clear(); // Clear the buffer for the next line
+                }
+            }
+        },
         Commands::Read {
             host,
             port,
@@ -64,26 +88,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let addr: SocketAddr = server_addr;
             let connect = Connect::new(addr).with_server_name("localhost");
             let mut connection = client.connect(connect).await?;
-
-            // Open a new bidirectional stream
-            let mut stream = connection.open_bidirectional_stream().await.unwrap();
-            stream.write_all("reader".as_bytes()).await.unwrap();
-            let (mut receive_stream, mut send_stream) = stream.split(); // Split the stream here
-
-            println!("--- Read client started. ---");
-            // Send the read command
-            // send_stream.send(Bytes::from("read")).await?;
-
-            // Receive the response from the server
-            loop {
-                // Attempt to receive data
-                if let Ok(Some(data)) = receive_stream.receive().await {
-                    println!("Received data: {:?}", data);
-                }
-
-                // Sleep for a specified duration before the next iteration
-                time::sleep(Duration::from_secs(1)).await; // Adjust the duration as needed
-            }
         }
         Commands::Write {
             host,
@@ -106,22 +110,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             // ensure the connection doesn't time out with inactivity
             connection.keep_alive(true)?;
-
-            // open a new bidirection stream
-            println!("--- Write client started. Write down message and press enter ---");
-            let mut stream = connection.open_bidirectional_stream().await.unwrap();
-            stream.write_all("writer".as_bytes()).await.unwrap();
-            let (mut receive_stream, mut send_stream) = stream.split();
-
-            // copy responses from the server
-            // tokio::spawn(async move {
-            //     let mut stdout = tokio::io::stdout();
-            //     let _ = tokio::io::copy(&mut receive_stream, &mut stdout).await;
-            // });
-
-            // copy data from stdin and send it to the server
-            let mut stdin = tokio::io::stdin();
-            tokio::io::copy(&mut stdin, &mut send_stream).await?;
         }
     }
 
