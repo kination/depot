@@ -1,28 +1,47 @@
 use clap::{Parser, Subcommand};
 use s2n_quic::{client::Connect, Client};
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::option::Option;
 use s2n_quic::stream::BidirectionalStream;
 use s2n_quic::Server;
 use std::sync::Arc;
 use std::collections::HashMap;
 use std::{error::Error, path::Path};
+use std::time::SystemTime;
 use tokio::io::{self, AsyncBufReadExt};
 use tokio::sync::Mutex;
 use tokio::time::{self, Duration};
 use regex::Regex;
-use serde::Deserialize;
+use serde::{Serialize, Deserialize};
 
-use depot_common::Config;
-use depot_common::MessageQueue;
+use depot_common::{Config, TlsConfig};
 
 
-#[derive(Debug, Deserialize)]
-struct RunnerConfig {
-    r#type: String,
+#[derive(Serialize, Deserialize, Clone)]
+struct ClientConfig {
+    source: Vec<ClientSource>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct ClientSource {
+    r#type: String, // 'type' is a reserved keyword in Rust, so we use r#type
     file_path: String,
-    regex: String,
-    output: String,
-    schema: HashMap<String, String>,
+    tag: String,
+    sink: ClientSink,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct ClientSink {
+    host: String,
+    port: u16,
+    tls: TlsConfig,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct MessageFormat {
+    timestamp: String,
+    tag: String,
+    message: String,
 }
 
 
@@ -101,9 +120,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     match cli.command {
         Commands::Runner { config_file } => {
-            let config: RunnerConfig = serde_yaml::from_reader(std::fs::File::open(config_file)?)?; // Add this line to read the config
-            println!("--- Read new lines of log file: {} ---", config.file_path);
-            let file = tokio::fs::File::open(config.file_path).await?;
+            let config: ClientConfig = serde_yaml::from_reader(std::fs::File::open(config_file)?)?;
+
+            // TODO: config.source is array, but for test just use first item
+            let first_config = config.source.first().unwrap();
+            // println!("--- Read new lines of log file: {} ---", config[0].file_path);
+            let file = tokio::fs::File::open(&first_config.file_path).await?;
             let mut reader = tokio::io::BufReader::new(file);
             let mut buffer = String::new();
     
@@ -115,7 +137,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     println!("No new line, wait for 10 second");
                     time::sleep(Duration::from_secs(10)).await;
                 } else {
-                    // Print the new line read from the log file
+                    let message = MessageFormat {
+                        timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs().to_string(),
+                        tag: first_config.tag.clone(),
+                        message: buffer.clone()
+                    };
+
+                    let json_string = serde_json::to_string(&message).unwrap();
+                    tokio::spawn(
+                            async move { 
+                                if let Err(e) = send_message_to_server(json_string).await {
+                                    eprintln!("Error sending message to server: {}", e);
+                                }
+                            }
+                        );
+                    /*
                     let re = Regex::new(
                         &config.regex
                     ).unwrap();
@@ -139,6 +175,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     } else {
                         println!("No message captured by regex")
                     }
+                     */
 
                     buffer.clear(); 
                 }
