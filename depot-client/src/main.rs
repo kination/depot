@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use s2n_quic::{client::Connect, Client};
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::option::Option;
-use s2n_quic::stream::BidirectionalStream;
+use s2n_quic::stream::{BidirectionalStream, SendStream};
 use s2n_quic::Server;
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -24,7 +24,7 @@ struct ClientConfig {
 
 #[derive(Serialize, Deserialize, Clone)]
 struct ClientSource {
-    r#type: String, // 'type' is a reserved keyword in Rust, so we use r#type
+    r#type: String,
     file_path: String,
     tag: String,
     sink: ClientSink,
@@ -34,7 +34,7 @@ struct ClientSource {
 struct ClientSink {
     host: String,
     port: u16,
-    tls: TlsConfig,
+    tls_cert_file: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -79,14 +79,14 @@ enum Commands {
     },
 }
 
-async fn send_message_to_server(json_message: String) -> Result<(), Box<dyn Error>> {
-    let config = Config::new();
-    let server_addr = format!("{}:{}", &config.server.host, &config.server.port)
+async fn create_server_conn_stream(sink_config: &ClientSink) -> Result<(SendStream), Box<dyn Error>> {
+    // let config = Config::new();
+    let server_addr = format!("{}:{}", sink_config.host, sink_config.port)
         .to_socket_addrs()?
         .next()
         .unwrap();
     let client = Client::builder()
-        .with_tls(Path::new(&config.server.tls.cert_file_path))?
+        .with_tls(Path::new(&sink_config.tls_cert_file))?
         .with_io("0.0.0.0:0")?
         .start()?;
 
@@ -99,19 +99,19 @@ async fn send_message_to_server(json_message: String) -> Result<(), Box<dyn Erro
     
     // open a new stream and split the receiving and sending sides
     let stream = connection.open_bidirectional_stream().await?;
-    let (mut receive_stream, mut send_stream) = stream.split();
-
+    let (mut receive_stream, send_stream) = stream.split();
+    Ok(send_stream)
     // spawn a task that copies responses from the server to stdout
-    tokio::spawn(async move {
-        let mut stdout = tokio::io::stdout();
-        let _ = tokio::io::copy(&mut receive_stream, &mut stdout).await;
-    });
+    // tokio::spawn(async move {
+    //     let mut stdout = tokio::io::stdout();
+    //     let _ = tokio::io::copy(&mut receive_stream, &mut stdout).await;
+    // });
 
     // copy data from stdin and send it to the server
-    let mut json_stream = std::io::Cursor::new(json_message);
-    tokio::io::copy(&mut json_stream, &mut send_stream).await?;
+    // let mut json_stream = std::io::Cursor::new(json_message);
+    // tokio::io::copy(&mut json_stream, &mut send_stream).await?;
 
-    Ok(())
+    // Ok(())
 }
 
 #[tokio::main]
@@ -128,14 +128,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let file = tokio::fs::File::open(&first_config.file_path).await?;
             let mut reader = tokio::io::BufReader::new(file);
             let mut buffer = String::new();
+            let sink_config = Arc::new(first_config.sink.clone());
+            let mut send_stream = match create_server_conn_stream(&sink_config).await {
+                Ok(stream) => stream, // Successfully got the send stream
+                Err(e) => {
+                    eprintln!("Error sending message to server: {}", e);
+                    return Ok(())
+                }
+            };
     
             loop {
                 // Read new lines from the log file
                 let bytes_read = reader.read_line(&mut buffer).await?;
                 if bytes_read == 0 {
                     // If no bytes were read, wait for a while before trying again
-                    println!("No new line, wait for 10 second");
-                    time::sleep(Duration::from_secs(10)).await;
+                    println!("No new line, wait for 5 second");
+                    time::sleep(Duration::from_secs(5)).await;
                 } else {
                     let message = MessageFormat {
                         timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs().to_string(),
@@ -144,38 +152,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     };
 
                     let json_string = serde_json::to_string(&message).unwrap();
-                    tokio::spawn(
-                            async move { 
-                                if let Err(e) = send_message_to_server(json_string).await {
-                                    eprintln!("Error sending message to server: {}", e);
-                                }
-                            }
-                        );
-                    /*
-                    let re = Regex::new(
-                        &config.regex
-                    ).unwrap();
-                    
-                    if let Some(captures) = re.captures(&buffer) {
-                        let mut json_message = serde_json::json!({});
-                        // Iterate over the keys in the schema HashMap
-                        for (key, field_type) in &config.schema {
-                            if let Some(value) = captures.name(key) {
-                                json_message[key] = serde_json::json!(value.as_str());
-                            }
-                        }
-
-                        println!("JSON Output -> {}", json_message);
-                        let json_string = serde_json::to_string(&json_message).unwrap();
-                        tokio::spawn(
-                            async move { 
-                                send_message_to_server(json_string).await;
-                            }
-                        );
-                    } else {
-                        println!("No message captured by regex")
-                    }
-                     */
+                    println!("Send new line -> {}", json_string);
+                    let mut json_stream = std::io::Cursor::new(json_string);
+                    tokio::io::copy(&mut json_stream, &mut send_stream).await?;
 
                     buffer.clear(); 
                 }
