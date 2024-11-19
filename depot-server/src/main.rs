@@ -6,8 +6,6 @@ use std::sync::Arc;
 use std::{error::Error, path::Path};
 use serde::{Serialize, Deserialize};
 
-// use depot_common::Config;
-use depot_common::MessageQueue;
 use tokio::sync::Mutex;
 
 
@@ -99,7 +97,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             continue;
                         }
                         let message: MessageFormat = serde_json::from_slice(&data).unwrap();
-                        // println!("Deserialized message: {:?}", message);
+                        println!("Deserialized message: {:?}", message);
 
                         // let queue_guard = queue.lock().await;
                         // queue_guard.push(data.clone()).await;
@@ -112,3 +110,4 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
+
