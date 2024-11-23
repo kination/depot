@@ -5,7 +5,8 @@ use std::net::ToSocketAddrs;
 use std::sync::Arc;
 use std::{error::Error, path::Path};
 use serde::{Serialize, Deserialize};
-
+use serde_json::Value;
+use regex::Regex;
 use tokio::sync::Mutex;
 
 
@@ -91,13 +92,34 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                 tokio::spawn(async move {
                     while let Ok(Some(data)) = stream.receive().await {
-                        println!("Received data: {:?}", data);
+                        // println!("Received data: {:?}", data);
                         if data.is_empty() {
                             println!("No data");
                             continue;
                         }
-                        let message: MessageFormat = serde_json::from_slice(&data).unwrap();
-                        println!("Deserialized message: {:?}", message);
+
+                        let data_str = String::from_utf8_lossy(&data);
+                        // Step 2: Use a regex to find all JSON objects
+                        let json_regex = Regex::new(r"\{.*?\}").unwrap(); // Regex to match JSON objects
+                        let json_matches: Vec<&str> = json_regex.find_iter(&data_str)
+                            .filter_map(|m| Some(m.as_str()))
+                            .collect();
+
+                        // Step 3: Deserialize each JSON object
+                        for json_str in json_matches {
+                            match serde_json::from_str::<MessageFormat>(json_str) {
+                                Ok(message) => {
+                                    println!("Deserialized message: {:?}", message);
+                                    // Process the message as needed
+                                },
+                                Err(e) => {
+                                    println!("Failed to deserialize JSON: {}", e);
+                                }
+                            }
+                        }
+
+                        // let message: MessageFormat = serde_json::from_slice(&data).unwrap();
+                        // println!("Deserialized message: {:?}", message);
 
                         // let queue_guard = queue.lock().await;
                         // queue_guard.push(data.clone()).await;
