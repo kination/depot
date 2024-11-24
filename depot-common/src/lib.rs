@@ -19,7 +19,7 @@ pub struct ServerConfig {
     pub tls: TlsConfig,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TlsConfig {
     pub cert_file_path: String,
     pub key_file_path: String,
@@ -28,7 +28,15 @@ pub struct TlsConfig {
 impl Config {
     pub fn new() -> Self {
         let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        // println!("root path -> {:?}", project_root);
         let config_file_path = project_root.parent().unwrap().join("config.yaml");
+        let config_dir = project_root.parent().unwrap();
+        let entries = fs::read_dir(config_dir).expect("Failed to read directory");
+        for entry in entries {
+            let entry = entry.expect("Failed to get entry");
+            println!("{:?}", entry.path());
+        }
+        println!("config file path -> {:?}", config_file_path);
         let config_file_content =
             fs::File::open(config_file_path).expect("Failed to read config file");
         let config: Config =
@@ -64,4 +72,8 @@ impl MessageQueue {
         let queue = self.messages.lock().await;
         queue.is_empty() // Check if the underlying VecDeque is empty
     }
+}
+
+pub trait Transformer {
+    fn transform(&self, message: &str) -> String;
 }
