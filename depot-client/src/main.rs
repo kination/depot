@@ -1,8 +1,8 @@
 use clap::{Parser, Subcommand};
 use s2n_quic::{client::Connect, Client};
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::ToSocketAddrs;
 use std::option::Option;
-use s2n_quic::stream::{BidirectionalStream, SendStream};
+use s2n_quic::stream::SendStream;
 use std::sync::Arc;
 use std::{error::Error, path::Path};
 use std::time::SystemTime;
@@ -10,8 +10,6 @@ use tokio::io::{AsyncReadExt, AsyncBufReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 use tokio::time::{self, Duration};
 use serde::{Serialize, Deserialize};
-
-// use depot_common::{Config, TlsConfig};
 
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -75,19 +73,8 @@ async fn create_server_conn_stream(sink_config: &ClientSink) -> Result<(SendStre
     
     // open a new stream and split the receiving and sending sides
     let stream = connection.open_bidirectional_stream().await?;
-    let (mut receive_stream, send_stream) = stream.split();
+    let (_, send_stream) = stream.split();
     Ok(send_stream)
-    // spawn a task that copies responses from the server to stdout
-    // tokio::spawn(async move {
-    //     let mut stdout = tokio::io::stdout();
-    //     let _ = tokio::io::copy(&mut receive_stream, &mut stdout).await;
-    // });
-
-    // copy data from stdin and send it to the server
-    // let mut json_stream = std::io::Cursor::new(json_message);
-    // tokio::io::copy(&mut json_stream, &mut send_stream).await?;
-
-    // Ok(())
 }
 
 #[tokio::main]
@@ -151,7 +138,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                     let json_string = serde_json::to_string(&message).unwrap();
                     // println!("Send new line -> {}", json_string);
-                    let mut json_stream = std::io::Cursor::new(json_string);
+                    let json_stream = std::io::Cursor::new(json_string);
 
                     // Manually write the data in chunks
                     let mut temp_buffer = vec![0; 1024]; // Adjust the buffer size as needed
@@ -180,7 +167,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 Ok(n) => send_buffer = &send_buffer[n..], // Update the remaining buffer
                                 Err(e) => {
                                     eprintln!("Error sending data: {}", e);
-                                    return Err(e.into()); // Handle the error appropriately
+                                    return Err(e.into());
                                 }
                             }
                         }

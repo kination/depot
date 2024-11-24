@@ -2,5 +2,7 @@
 members = [
     "depot-common",
     "depot-client",
-    "depot-server"
+    "depot-server",
+    "transform-demo",
+    "transform-demo-second"
 ]

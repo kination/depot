@@ -1,13 +1,16 @@
 use rustls::server;
-use s2n_quic::stream::BidirectionalStream;
 use s2n_quic::Server;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
 use std::{error::Error, path::Path};
 use serde::{Serialize, Deserialize};
-use serde_json::Value;
 use regex::Regex;
 use tokio::sync::Mutex;
+
+use depot_common::Transformer;
+use transform_demo::transform::TransformDemoModule;
+use transform_demo_second::transform_second::TransformDemoModuleSecond;
+
 
 
 #[derive(Serialize, Deserialize)]
@@ -16,26 +19,27 @@ struct ServerConfig {
     setting: Settings,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct InputConfig {
     tag: String,
+    module: String,
     parse: Option<ParseConfig>,
-    filter: Option<FilterConfig>, // Optional since not all inputs have a filter
+    filter: Option<FilterConfig>,
     produce: Vec<ProduceConfig>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct ParseConfig {
     r#type: String,
     exp: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct FilterConfig {
     rule: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct ProduceConfig {
     r#type: String,
     host: Option<String>,
@@ -67,6 +71,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         )?
     )?;
     let server_settings = server_config.setting;
+    let server_inputs = server_config.inputs;
 
     let server_addr = format!("{}:{}", &server_settings.host, &server_settings.port)
         .to_socket_addrs()?
@@ -79,20 +84,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
         ))?
         .with_io(server_addr)?
         .start()?;
-    // let queue = Arc::new(Mutex::new(MessageQueue::new()));
 
     println!("--- Server started in {} ---", server_addr.to_string());
+    let server_inputs = Arc::new(server_inputs); 
     while let Some(mut connection) = server.accept().await {
         // let queue = Arc::clone(&queue);
-
+        let server_inputs = Arc::clone(&server_inputs);
         tokio::spawn(async move {
+            
             while let Ok(Some(mut stream)) = connection.accept_bidirectional_stream().await {
                 println!("new connection!!");
-                // let queue = Arc::clone(&queue);
-
+                let server_inputs = Arc::clone(&server_inputs);
                 tokio::spawn(async move {
                     while let Ok(Some(data)) = stream.receive().await {
-                        // println!("Received data: {:?}", data);
                         if data.is_empty() {
                             println!("No data");
                             continue;
@@ -109,8 +113,33 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         for json_str in json_matches {
                             match serde_json::from_str::<MessageFormat>(json_str) {
                                 Ok(message) => {
-                                    println!("Deserialized message: {:?}", message);
-                                    // Process the message as needed
+                                    let module_type = server_inputs.iter()
+                                        .find(|input| input.tag == message.tag) // Find the input with the matching tag
+                                        .map(|input| input.module.clone()) // Get the module name if found
+                                        .unwrap_or_else(|| {
+                                            println!("No matching module found for tag: {}", message.tag);
+                                            String::new()
+                                        });
+
+                                    let transformer: Box<dyn Transformer> = match module_type.as_str() {
+                                        "transform-demo" => Box::new(TransformDemoModule),
+                                        "transform-demo-second" => Box::new(TransformDemoModuleSecond),
+                                        _ => {
+                                            println!("No matching transformer found for module type: {}", module_type);
+                                            return;
+                                        },
+                                    };    
+                                    
+                                    match serde_json::to_string(&message) {
+                                        Ok(json_string) => {
+                                            println!("The message is valid JSON: {}", json_string);
+                                            let transformed_message = transformer.transform(&json_string);
+                                            println!("Transformed message: {}", transformed_message);
+                                        },
+                                        Err(e) => {
+                                            println!("The message is not valid JSON: {}", e);
+                                        }
+                                    }
                                 },
                                 Err(e) => {
                                     println!("Failed to deserialize JSON: {}", e);
