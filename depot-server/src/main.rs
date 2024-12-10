@@ -5,11 +5,11 @@ use std::sync::Arc;
 use std::{error::Error, path::Path};
 use serde::{Serialize, Deserialize};
 use regex::Regex;
-use tokio::sync::Mutex;
+use std::collections::HashMap;
 
 use depot_common::Transformer;
+use transform_regex::transform::TransformRegexModule;
 use transform_demo::transform::TransformDemoModule;
-use transform_demo_second::transform_second::TransformDemoModuleSecond;
 
 
 
@@ -23,6 +23,7 @@ struct ServerConfig {
 struct InputConfig {
     tag: String,
     module: String,
+    option: Option<HashMap<String, String>>,
     parse: Option<ParseConfig>,
     filter: Option<FilterConfig>,
     produce: Vec<ProduceConfig>,
@@ -121,20 +122,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                             String::new()
                                         });
 
-                                    let transformer: Box<dyn Transformer> = match module_type.as_str() {
-                                        "transform-demo" => Box::new(TransformDemoModule),
-                                        "transform-demo-second" => Box::new(TransformDemoModuleSecond),
-                                        _ => {
-                                            println!("No matching transformer found for module type: {}", module_type);
-                                            return;
-                                        },
-                                    };    
-                                    
+                                    let transformer = get_transformer(&module_type).unwrap_or_else(|| {
+                                        // Handle the case where no transformer is found
+                                        println!("Exiting due to missing transformer.");
+                                        std::process::exit(1); // Exit the program or handle as needed
+                                    });
+
+                                    let option = server_inputs.iter()
+                                        .find(|input| input.tag == message.tag)
+                                        .and_then(|input| input.option.clone()); 
+                                
                                     match serde_json::to_string(&message) {
                                         Ok(json_string) => {
                                             println!("The message is valid JSON: {}", json_string);
-                                            let transformed_message = transformer.transform(&json_string);
-                                            println!("Transformed message: {}", transformed_message);
+                                            let transformed_message = transformer.transform(&json_string, option);
+                                            // println!("Transformed message: {:?}", transformed_message);
                                         },
                                         Err(e) => {
                                             println!("The message is not valid JSON: {}", e);
@@ -160,5 +162,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+fn get_transformer(module_type: &str) -> Option<Box<dyn Transformer>> {
+    match module_type {
+        "transform-regex" => Some(Box::new(TransformRegexModule)),
+        "transform-demo" => Some(Box::new(TransformDemoModule)),
+        _ => {
+            println!("No matching transformer found for module type: {}", module_type);
+            None // Return None if no valid transformer is found
+        },
+    }
 }
 
