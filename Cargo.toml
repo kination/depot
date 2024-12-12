@@ -3,6 +3,6 @@ members = [
     "depot-common",
     "depot-client",
     "depot-server",
-    "transform-demo",
-    "transform-demo-second"
+    "transform-regex",
+    "transform-demo"
 ]

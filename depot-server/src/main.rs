@@ -1,4 +1,13 @@
-use rustls::server;
+use serde_json::Value;
+use rdkafka::ClientConfig;
+// use rdkafka::producer::FutureProducer;
+use rdkafka::error::KafkaError;
+use rdkafka::producer::{FutureRecord, FutureProducer};
+use rdkafka::message::{Header, OwnedHeaders};
+use std::fs::OpenOptions;
+use std::io::Write;
+use csv::{Writer, WriterBuilder};
+use tokio::sync::oneshot;
 use s2n_quic::Server;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
@@ -62,6 +71,74 @@ struct MessageFormat {
     message: String,
 }
 
+// TODO: Remove test values, and add key setting
+async fn handle_message(message: &str, option: &str, target: &str) -> Result<(), Box<dyn std::error::Error>> {
+    match serde_json::to_string(&message) {
+        Ok(json_string) => {
+            match target {
+                "kafka" => {
+                    let producer: FutureProducer = rdkafka::ClientConfig::new()
+                        .set("bootstrap.servers", "localhost:9092") // Change to your Kafka broker address
+                        .create()?;
+
+                    let topic_name = "quickstart-events";
+                    produce_message(&producer, topic_name, message).await;
+                }
+                /*
+                "csv" => {
+                    // let key = match transformed_message.get("key") {
+                    //     Some(Value::String(s)) => s,
+                    //     _ => return Err("JSON must contain a 'key' string field for CSV output".into()),
+                    // };
+                    let filepath = "output.csv";
+                    let mut wtr = WriterBuilder::new()
+                        .from_path(filepath)
+                        .expect("Failed to create CSV writer");
+
+                    // create/append to file
+                    if wtr.get_writer().metadata().len() > 0 {
+                         wtr.write_record(&[key])?;
+                    } else {
+                        wtr.write_record(&[key])?;
+                    }
+
+                    wtr.flush()?;
+                }
+                */
+                "file" => {
+                    let filepath = "output.txt";
+                    let mut file = OpenOptions::new()
+                        .append(true)
+                        .create(true)
+                        .open(filepath)?;
+                    writeln!(file, "{}", message)?;
+
+                }
+                _ => return Err(format!("Unknown target: {}", target).into()),
+            }
+        }
+        Err(e) => {
+            println!("The message is not valid JSON: {}", e);
+            return Err(e.into());
+        }
+    }
+    Ok(())
+}
+
+// TODO: Remove test values, and add key setting
+async fn produce_message(producer: &FutureProducer, topic_name: &str, message: &str) {
+    let payload = serde_json::to_string(message).unwrap();
+    let delivery_future = producer.send(
+        FutureRecord::to(topic_name).payload(&payload)
+                        .key("test-key")
+                        .headers(OwnedHeaders::new().insert(Header {
+                            key: "header_key",
+                            value: Some("header_value"),
+                        })),
+        std::time::Duration::from_secs(0)
+    );
+    let _ = delivery_future.await;
+}
 
 
 #[tokio::main]
@@ -130,31 +207,32 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                                     let option = server_inputs.iter()
                                         .find(|input| input.tag == message.tag)
-                                        .and_then(|input| input.option.clone()); 
-                                
+                                        .and_then(|input| input.option.clone());
+
+                                    // TODO: for test
+                                    let target = "kafka";
+                                    let run_option = "some_option";
+                                    println!("{:?}", option);
+
                                     match serde_json::to_string(&message) {
                                         Ok(json_string) => {
-                                            println!("The message is valid JSON: {}", json_string);
-                                            let transformed_message = transformer.transform(&json_string, option);
-                                            // println!("Transformed message: {:?}", transformed_message);
+                                            let transformed_message = transformer.transform(&json_string, option).unwrap();
+                                            println!("Transformed message: {:?}", transformed_message);
+                                            tokio::spawn(async move {
+                                                let _ = handle_message(&transformed_message, run_option, target).await;
+                                            });
                                         },
                                         Err(e) => {
                                             println!("The message is not valid JSON: {}", e);
                                         }
                                     }
+                                
                                 },
                                 Err(e) => {
                                     println!("Failed to deserialize JSON: {}", e);
                                 }
                             }
                         }
-
-                        // let message: MessageFormat = serde_json::from_slice(&data).unwrap();
-                        // println!("Deserialized message: {:?}", message);
-
-                        // let queue_guard = queue.lock().await;
-                        // queue_guard.push(data.clone()).await;
-                        // println!("Queue contents: {:?}", *queue_guard);
                     }
                 });
             }
@@ -174,4 +252,5 @@ fn get_transformer(module_type: &str) -> Option<Box<dyn Transformer>> {
         },
     }
 }
+
 
