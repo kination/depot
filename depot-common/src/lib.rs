@@ -77,5 +77,5 @@ impl MessageQueue {
 use std::collections::HashMap;
 
 pub trait Transformer {
-    fn transform(&self, message: &str, option: Option<HashMap<String, String>>) -> Result<String, String>;
+    fn transform(&self, message: &str, option: &Option<HashMap<String, String>>) -> Result<String, String>;
 }

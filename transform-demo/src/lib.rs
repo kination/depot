@@ -7,7 +7,7 @@ pub mod transform {
     pub struct TransformDemoModule;
 
     impl Transformer for TransformDemoModule {
-        fn transform(&self, message: &str, option: Option<HashMap<String, String>>) -> Result<String, String> {
+        fn transform(&self, message: &str, option: &Option<HashMap<String, String>>) -> Result<String, String> {
             // TODO: Your transformation logic here
             Ok(message.to_lowercase())
         }

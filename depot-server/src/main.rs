@@ -1,3 +1,4 @@
+use rustls::crypto::hash::Hash;
 use serde_json::Value;
 use rdkafka::ClientConfig;
 // use rdkafka::producer::FutureProducer;
@@ -21,35 +22,34 @@ use transform_regex::transform::TransformRegexModule;
 use transform_demo::transform::TransformDemoModule;
 
 
-
 #[derive(Serialize, Deserialize)]
 struct ServerConfig {
     inputs: Vec<InputConfig>,
     setting: Settings,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 struct InputConfig {
     tag: String,
     module: String,
     option: Option<HashMap<String, String>>,
     parse: Option<ParseConfig>,
     filter: Option<FilterConfig>,
-    produce: Vec<ProduceConfig>,
+    produce: HashMap<String, String>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 struct ParseConfig {
     r#type: String,
     exp: String,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 struct FilterConfig {
     rule: String,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 struct ProduceConfig {
     r#type: String,
     host: Option<String>,
@@ -72,17 +72,28 @@ struct MessageFormat {
 }
 
 // TODO: Remove test values, and add key setting
-async fn handle_message(message: &str, option: &str, target: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn handle_message(message: &str, option: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
+    let option = option.clone();
     match serde_json::to_string(&message) {
         Ok(json_string) => {
-            match target {
+            match option["type"].as_str() {
                 "kafka" => {
                     let producer: FutureProducer = rdkafka::ClientConfig::new()
-                        .set("bootstrap.servers", "localhost:9092") // Change to your Kafka broker address
+                        .set("bootstrap.servers", option["bootstrap_server"].clone()) // Change to your Kafka broker address
                         .create()?;
 
-                    let topic_name = "quickstart-events";
+                    let topic_name = option["topic"].as_str();
+                    // println!("Produce message to topic {:?} -> {:?}", topic_name, message);
                     produce_message(&producer, topic_name, message).await;
+                }
+                "file" => {
+                    let filepath = "output.txt";
+                    let mut file = OpenOptions::new()
+                        .append(true)
+                        .create(true)
+                        .open(filepath)?;
+                    writeln!(file, "{}", message)?;
+
                 }
                 /*
                 "csv" => {
@@ -105,16 +116,7 @@ async fn handle_message(message: &str, option: &str, target: &str) -> Result<(),
                     wtr.flush()?;
                 }
                 */
-                "file" => {
-                    let filepath = "output.txt";
-                    let mut file = OpenOptions::new()
-                        .append(true)
-                        .create(true)
-                        .open(filepath)?;
-                    writeln!(file, "{}", message)?;
-
-                }
-                _ => return Err(format!("Unknown target: {}", target).into()),
+                _ => return Err(format!("Unknown target: {}", option["type"].as_str()).into()),
             }
         }
         Err(e) => {
@@ -125,7 +127,7 @@ async fn handle_message(message: &str, option: &str, target: &str) -> Result<(),
     Ok(())
 }
 
-// TODO: Remove test values, and add key setting
+// TODO: Remove test key/header, and add key setting
 async fn produce_message(producer: &FutureProducer, topic_name: &str, message: &str) {
     let payload = serde_json::to_string(message).unwrap();
     let delivery_future = producer.send(
@@ -143,6 +145,7 @@ async fn produce_message(producer: &FutureProducer, topic_name: &str, message: &
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    // TODO: Setup config file path in flexible way
     let server_config: ServerConfig = serde_yaml::from_reader(
         std::fs::File::open(
             "/Users/kination/workspace/public/depot/configs/sample-server-config.yaml"
@@ -169,7 +172,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // let queue = Arc::clone(&queue);
         let server_inputs = Arc::clone(&server_inputs);
         tokio::spawn(async move {
-            
             while let Ok(Some(mut stream)) = connection.accept_bidirectional_stream().await {
                 println!("new connection!!");
                 let server_inputs = Arc::clone(&server_inputs);
@@ -191,35 +193,38 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         for json_str in json_matches {
                             match serde_json::from_str::<MessageFormat>(json_str) {
                                 Ok(message) => {
-                                    let module_type = server_inputs.iter()
+                                    let flow_option = server_inputs.iter()
                                         .find(|input| input.tag == message.tag) // Find the input with the matching tag
-                                        .map(|input| input.module.clone()) // Get the module name if found
-                                        .unwrap_or_else(|| {
-                                            println!("No matching module found for tag: {}", message.tag);
-                                            String::new()
-                                        });
+                                        .map(|input| input.clone()) // Get the module name if found
+                                        .unwrap();
 
-                                    let transformer = get_transformer(&module_type).unwrap_or_else(|| {
-                                        // Handle the case where no transformer is found
-                                        println!("Exiting due to missing transformer.");
-                                        std::process::exit(1); // Exit the program or handle as needed
-                                    });
+                                    let transformer = get_transformer(&flow_option.module);
 
-                                    let option = server_inputs.iter()
-                                        .find(|input| input.tag == message.tag)
-                                        .and_then(|input| input.option.clone());
+                                    // let option = server_inputs.iter()
+                                    //     .find(|input| input.tag == message.tag)
+                                    //     .and_then(|input| input.option.clone());
+                                    // println!("option: {:?}", option);
 
                                     // TODO: for test
                                     let target = "kafka";
                                     let run_option = "some_option";
-                                    println!("{:?}", option);
+                                    let option = flow_option.option;
 
                                     match serde_json::to_string(&message) {
                                         Ok(json_string) => {
-                                            let transformed_message = transformer.transform(&json_string, option).unwrap();
+                                            let transformed_message = if let Some(transformer) = transformer {
+                                                transformer.transform(&json_string, &option).unwrap()
+                                            } else {
+                                                json_string
+                                            };
+                                            
+                                            let produce_option = Arc::new(flow_option.produce);
                                             println!("Transformed message: {:?}", transformed_message);
                                             tokio::spawn(async move {
-                                                let _ = handle_message(&transformed_message, run_option, target).await;
+                                                
+                                                let option_clone = Arc::clone(&produce_option);
+                                                let option_ref = option_clone.as_ref();
+                                                let _ = handle_message(&transformed_message, &option_ref).await;
                                             });
                                         },
                                         Err(e) => {

@@ -6,7 +6,7 @@ pub mod transform {
     pub struct TransformRegexModule;
 
     impl Transformer for TransformRegexModule {
-        fn transform(&self, message: &str, option: Option<HashMap<String, String>>) -> Result<String, String> {
+        fn transform(&self, message: &str, option: &Option<HashMap<String, String>>) -> Result<String, String> {
             if let Some(ref opts) = option {
                 let expression = opts.get("exp").ok_or("Error: 'exp' key not found!")?;
                 let regex = Regex::new(expression).unwrap();
