@@ -184,13 +184,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                         let data_str = String::from_utf8_lossy(&data);
                         // Step 2: Use a regex to find all JSON objects
-                        let json_regex = Regex::new(r"\{.*?\}").unwrap(); // Regex to match JSON objects
+                        // Use the "s" flag (DOTALL) to make "." match newlines too
+                        let json_regex = Regex::new(r"(?s)\{.*?\}").unwrap();
                         let json_matches: Vec<&str> = json_regex.find_iter(&data_str)
                             .filter_map(|m| Some(m.as_str()))
                             .collect();
 
+                        
                         // Step 3: Deserialize each JSON object
                         for json_str in json_matches {
+                            println!("data str -> {:?}", json_str);
                             match serde_json::from_str::<MessageFormat>(json_str) {
                                 Ok(message) => {
                                     let flow_option = server_inputs.iter()
@@ -209,9 +212,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     let target = "kafka";
                                     let run_option = "some_option";
                                     let option = flow_option.option;
-
                                     match serde_json::to_string(&message) {
                                         Ok(json_string) => {
+                                            
                                             let transformed_message = if let Some(transformer) = transformer {
                                                 transformer.transform(&json_string, &option).unwrap()
                                             } else {
@@ -219,7 +222,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                             };
                                             
                                             let produce_option = Arc::new(flow_option.produce);
-                                            println!("Transformed message: {:?}", transformed_message);
+                                            // println!("Transformed message: {:?}", transformed_message);
                                             tokio::spawn(async move {
                                                 
                                                 let option_clone = Arc::clone(&produce_option);

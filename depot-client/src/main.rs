@@ -108,12 +108,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     time::sleep(Duration::from_secs(5)).await;
                 } else {
                     buffer = buffer.trim().to_string();
+                    let escaped_buffer = buffer.replace("\n", "\\n");
                     // Debugging: Print the content of the buffer
                     println!("Buffer content: {}", buffer);
                     let message = MessageFormat {
                         timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_millis().to_string(),
                         tag: first_config.tag.clone(),
-                        message: buffer.clone()
+                        message: escaped_buffer
                     };
 
                     /*
